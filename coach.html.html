@@ -372,6 +372,62 @@
     font-size: 14px;
     padding: 10px 0;
   }
+  .cat-btn {
+    padding: 16px 22px;
+    font-size: 16px;
+    font-weight: 800;
+    background: rgba(255,255,255,0.1);
+    border: 2px solid var(--or);
+    color: #fff;
+    border-radius: 12px;
+    cursor: pointer;
+    min-width: 90px;
+  }
+  .cat-btn:active { background: var(--or); color: var(--bleu); }
+  .back-btn {
+    background: none;
+    border: none;
+    color: var(--or);
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 14px;
+    cursor: pointer;
+    padding: 6px 0;
+  }
+  .player-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fff;
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+  .player-row:active { background: #eee; }
+  .player-row .pname {
+    font-weight: 700;
+    color: var(--bleu);
+    font-size: 15px;
+  }
+  .player-row .pcount {
+    font-size: 12px;
+    color: #777;
+  }
+  .player-row .parrow {
+    color: var(--or);
+    font-weight: 800;
+    font-size: 18px;
+  }
+  .del-btn {
+    background: #dc2626;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -404,19 +460,25 @@
 
   <div id="dashboardBox" style="display:none;">
     <div id="roleBadge" class="role-badge"></div>
-    <div id="catFilterWrap" style="display:none;">
-      <select class="cat-filter" id="catFilter">
-        <option value="">Toutes les catégories</option>
-        <option value="U12">U12</option>
-        <option value="U13">U13</option>
-        <option value="U14">U14</option>
-        <option value="U15">U15</option>
-      </select>
+
+    <div id="screenCategory">
+      <p style="color:#fff; text-align:center; margin-bottom:14px;">Choisis une catégorie</p>
+      <div id="categoryButtons" style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;"></div>
     </div>
-    <span class="count-line">Réponses visibles : <strong id="count">0</strong></span>
-    <div id="tableWrap" style="overflow-x:auto; margin-top:10px;"></div>
-    <button class="action" id="exportBtn">📥 Exporter en CSV</button>
-    <button class="action" id="logoutBtn" style="background:#555; border-color:#888;">Déconnexion</button>
+
+    <div id="screenPlayers" style="display:none;">
+      <button class="back-btn" id="backToCategory">← Catégories</button>
+      <span class="count-line">Joueurs — <strong id="catLabel"></strong></span>
+      <div id="playersList"></div>
+      <button class="action" id="exportBtn">📥 Exporter en CSV</button>
+    </div>
+
+    <div id="screenPlayerDetail" style="display:none;">
+      <button class="back-btn" id="backToPlayers">← Liste des joueurs</button>
+      <div id="playerTableWrap"></div>
+    </div>
+
+    <button class="action" id="logoutBtn" style="background:#555; border-color:#888; margin-top:16px;">Déconnexion</button>
   </div>
 </div>
 
@@ -474,27 +536,77 @@
     document.getElementById('loginBox').style.display = 'none';
     document.getElementById('dashboardBox').style.display = 'block';
     document.getElementById('roleBadge').textContent = profil.role === 'admin' ? 'ADMIN — accès complet' : 'COACH ' + profil.categorie;
-    document.getElementById('catFilterWrap').style.display = profil.role === 'admin' ? 'block' : 'none';
 
-    await loadResponses();
+    showCategoryScreen();
   });
 
-  document.getElementById('catFilter').addEventListener('change', loadResponses);
+  const TOUTES_CATEGORIES = ['U12', 'U13', 'U14', 'U15'];
 
-  async function loadResponses() {
-    document.getElementById('tableWrap').innerHTML = '<p class="loading-msg">Chargement...</p>';
-    let query = sb.from('reponses').select('*').order('created_at', { ascending: false });
-    if (currentRole === 'admin') {
-      const filterVal = document.getElementById('catFilter').value;
-      if (filterVal) query = query.eq('categorie', filterVal);
-    }
-    const { data, error } = await query;
+  function showCategoryScreen() {
+    document.getElementById('screenCategory').style.display = 'block';
+    document.getElementById('screenPlayers').style.display = 'none';
+    document.getElementById('screenPlayerDetail').style.display = 'none';
+
+    const cats = currentRole === 'admin' ? TOUTES_CATEGORIES : [currentCategorie];
+    const wrap = document.getElementById('categoryButtons');
+    wrap.innerHTML = '';
+    cats.forEach(cat => {
+      const btn = document.createElement('button');
+      btn.className = 'cat-btn';
+      btn.textContent = cat;
+      btn.addEventListener('click', () => selectCategorie(cat));
+      wrap.appendChild(btn);
+    });
+  }
+
+  let categoryData = [];
+  let selectedCategorie = null;
+  let selectedPrenom = null;
+
+  async function selectCategorie(cat) {
+    selectedCategorie = cat;
+    document.getElementById('screenCategory').style.display = 'none';
+    document.getElementById('screenPlayers').style.display = 'block';
+    document.getElementById('catLabel').textContent = cat;
+    document.getElementById('playersList').innerHTML = '<p class="loading-msg">Chargement...</p>';
+
+    const { data, error } = await sb
+      .from('reponses')
+      .select('*')
+      .eq('categorie', cat)
+      .order('created_at', { ascending: false });
+
     if (error) {
-      document.getElementById('tableWrap').innerHTML = '<p class="error-msg">Erreur chargement : ' + error.message + '</p>';
+      document.getElementById('playersList').innerHTML = '<p class="error-msg">Erreur : ' + error.message + '</p>';
       return;
     }
-    currentData = data || [];
-    renderTable();
+    categoryData = data || [];
+    renderPlayersList();
+  }
+
+  function renderPlayersList() {
+    if (categoryData.length === 0) {
+      document.getElementById('playersList').innerHTML = '<p style="color:#a9b8d6; text-align:center; padding:10px 0;">Aucune réponse pour le moment.</p>';
+      return;
+    }
+    const counts = {};
+    categoryData.forEach(r => { counts[r.prenom] = (counts[r.prenom] || 0) + 1; });
+
+    let html = '';
+    Object.keys(counts).sort().forEach(prenom => {
+      html += `<div class="player-row" data-prenom="${prenom}">
+        <div>
+          <div class="pname">${prenom}</div>
+          <div class="pcount">${counts[prenom]} réponse${counts[prenom] > 1 ? 's' : ''}</div>
+        </div>
+        <div class="parrow">›</div>
+      </div>`;
+    });
+    document.getElementById('playersList').innerHTML = html;
+
+    document.querySelectorAll('.player-row').forEach(row => {
+      row.addEventListener('click', () => selectPlayer(row.dataset.prenom));
+    });
   }
 
   function cellColor(v) {
@@ -513,52 +625,70 @@
     return { bg: '#dc2626', fg: '#fff', label: 'Très mauvais' };
   }
 
-  function renderTable() {
-    document.getElementById('count').textContent = currentData.length;
-    if (currentData.length === 0) {
-      document.getElementById('tableWrap').innerHTML = '<p style="color:#a9b8d6; text-align:center; padding:10px 0;">Aucune réponse pour le moment.</p>';
-      return;
-    }
-
-    // Regrouper les réponses par joueur (+ catégorie, utile en vue admin)
-    const groups = {};
-    currentData.forEach(r => {
-      const key = r.prenom + ' (' + r.categorie + ')';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(r);
-    });
-
-    let html = '';
-    Object.keys(groups).sort().forEach(playerKey => {
-      const rows = groups[playerKey];
-      html += `<div class="player-block"><h3>${playerKey}</h3><table>`;
-      html += '<tr><th>Date</th><th>Sommeil</th><th>Courbatures</th><th>Fatigue</th><th>Stress</th><th>Total</th><th>État</th></tr>';
-      rows.forEach(r => {
-        const d = new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-        // Total : sommeil inversé (bon sommeil = faible contribution) + les 3 autres tel quel
-        const sommeilInverse = 8 - r.sommeil;
-        const total = sommeilInverse + r.courbatures + r.fatigue + r.stress;
-        const tInfo = totalInfo(total);
-        const c1 = cellColor(r.sommeil), c2 = cellColor(r.courbatures), c3 = cellColor(r.fatigue), c4 = cellColor(r.stress);
-        html += `<tr>
-          <td>${d}</td>
-          <td style="background:${c1.bg}; color:${c1.fg};">${r.sommeil}</td>
-          <td style="background:${c2.bg}; color:${c2.fg};">${r.courbatures}</td>
-          <td style="background:${c3.bg}; color:${c3.fg};">${r.fatigue}</td>
-          <td style="background:${c4.bg}; color:${c4.fg};">${r.stress}</td>
-          <td style="background:${tInfo.bg}; color:${tInfo.fg};">${total}</td>
-          <td style="background:${tInfo.bg}; color:${tInfo.fg}; font-size:11px;">${tInfo.label}</td>
-        </tr>`;
-      });
-      html += '</table></div>';
-    });
-    document.getElementById('tableWrap').innerHTML = html;
+  function selectPlayer(prenom) {
+    selectedPrenom = prenom;
+    document.getElementById('screenPlayers').style.display = 'none';
+    document.getElementById('screenPlayerDetail').style.display = 'block';
+    renderPlayerDetail();
   }
 
+  function renderPlayerDetail() {
+    const rows = categoryData.filter(r => r.prenom === selectedPrenom);
+    let html = `<div class="player-block"><h3>${selectedPrenom} (${selectedCategorie})</h3><table>`;
+    html += '<tr><th>Date</th><th>Sommeil</th><th>Courb.</th><th>Fatigue</th><th>Stress</th><th>Total</th><th>État</th><th></th></tr>';
+    rows.forEach(r => {
+      const d = new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const sommeilInverse = 8 - r.sommeil;
+      const total = sommeilInverse + r.courbatures + r.fatigue + r.stress;
+      const tInfo = totalInfo(total);
+      const c1 = cellColor(r.sommeil), c2 = cellColor(r.courbatures), c3 = cellColor(r.fatigue), c4 = cellColor(r.stress);
+      html += `<tr>
+        <td>${d}</td>
+        <td style="background:${c1.bg}; color:${c1.fg};">${r.sommeil}</td>
+        <td style="background:${c2.bg}; color:${c2.fg};">${r.courbatures}</td>
+        <td style="background:${c3.bg}; color:${c3.fg};">${r.fatigue}</td>
+        <td style="background:${c4.bg}; color:${c4.fg};">${r.stress}</td>
+        <td style="background:${tInfo.bg}; color:${tInfo.fg};">${total}</td>
+        <td style="background:${tInfo.bg}; color:${tInfo.fg}; font-size:11px;">${tInfo.label}</td>
+        <td><button class="del-btn" data-id="${r.id}">✕</button></td>
+      </tr>`;
+    });
+    html += '</table></div>';
+    document.getElementById('playerTableWrap').innerHTML = html;
+
+    document.querySelectorAll('.del-btn').forEach(btn => {
+      btn.addEventListener('click', () => deleteResponse(btn.dataset.id));
+    });
+  }
+
+  async function deleteResponse(id) {
+    if (!confirm('Supprimer définitivement cette réponse ?')) return;
+    const { error } = await sb.from('reponses').delete().eq('id', id);
+    if (error) {
+      alert('Erreur suppression : ' + error.message);
+      return;
+    }
+    categoryData = categoryData.filter(r => String(r.id) !== String(id));
+    renderPlayerDetail();
+    // Si plus aucune réponse pour ce joueur, revenir à la liste
+    if (categoryData.filter(r => r.prenom === selectedPrenom).length === 0) {
+      backToPlayersScreen();
+    }
+  }
+
+  function backToPlayersScreen() {
+    document.getElementById('screenPlayerDetail').style.display = 'none';
+    document.getElementById('screenPlayers').style.display = 'block';
+    renderPlayersList();
+  }
+
+  document.getElementById('backToCategory').addEventListener('click', showCategoryScreen);
+  document.getElementById('backToPlayers').addEventListener('click', backToPlayersScreen);
+
   document.getElementById('exportBtn').addEventListener('click', () => {
-    if (currentData.length === 0) { alert('Aucune réponse à exporter.'); return; }
+    if (categoryData.length === 0) { alert('Aucune réponse à exporter.'); return; }
     let csv = 'Date;Prenom;Categorie;Sommeil;Courbatures;Fatigue;Stress;Total;Etat\n';
-    currentData.forEach(r => {
+    categoryData.forEach(r => {
       const d = new Date(r.created_at).toLocaleString('fr-FR');
       const total = (8 - r.sommeil) + r.courbatures + r.fatigue + r.stress;
       const label = totalInfo(total).label;
@@ -568,7 +698,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'reponses_' + new Date().toISOString().slice(0,10) + '.csv';
+    a.download = 'reponses_' + selectedCategorie + '_' + new Date().toISOString().slice(0,10) + '.csv';
     a.click();
     URL.revokeObjectURL(url);
   });
@@ -577,7 +707,9 @@
     await sb.auth.signOut();
     currentRole = null;
     currentCategorie = null;
-    currentData = [];
+    categoryData = [];
+    selectedCategorie = null;
+    selectedPrenom = null;
     document.getElementById('dashboardBox').style.display = 'none';
     document.getElementById('loginBox').style.display = 'block';
     document.getElementById('coachEmail').value = '';
